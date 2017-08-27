@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+.idea/
+# build-related files
+acrawl.egg-info
+build/
+dist/

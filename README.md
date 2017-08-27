@@ -1,2 +1,2 @@
 # acrawl
-Async crawel framework
+Async crawel framework based on asyncio
