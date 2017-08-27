@@ -1,14 +1,15 @@
-from acrawl import ACrawl
+from aiocrawl import AioCrawl
 from lxml import etree
 
 
-class LianjiaCrawl(ACrawl):
+class LianjiaCrawl(AioCrawl):
     concurrency = 2
     urls = ("http://sh.lianjia.com/zufang/d{}".format(index)
             for index in range(1, 100))
+    timeout = 10
 
     async def on_start(self):
-        await self.acrawl(self.urls, callback=self.fetch_houses, sleep=0.1)
+        await self.get(self.urls, callback=self.fetch_houses, sleep=0.5)
 
     async def fetch_houses(self, response):
         if response.status == 200:

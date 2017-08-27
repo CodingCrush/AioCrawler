@@ -10,6 +10,7 @@ with open(os.path.join(os.getcwd(), 'README.md'), encoding='utf-8') as f:
 install_requires = [
     'aiohttp',
     'aiofiles',
+    'async_timeout',
     'httptools',
     "lxml",
     'uvloop'
@@ -20,7 +21,7 @@ if sys.platform.startswith("win"):
 
 
 setup(
-    name="acrawl",
+    name="aiocrawl",
     version="0.0.1",
 
     description="Async crawler framework based on asyncio",
@@ -42,6 +43,6 @@ setup(
     keywords='scrapy crawler asyncio uvloop',
     install_requires=install_requires,
     license='MIT',
-    packages=find_packages(exclude=['contrib', 'docs', 'examples', 'tests']),
+    packages=find_packages(exclude=['docs', 'examples', 'tests']),
     include_package_data=True,
 )
