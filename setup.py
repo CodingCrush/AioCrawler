@@ -42,6 +42,6 @@ setup(
     keywords='scrapy crawler asyncio uvloop',
     install_requires=install_requires,
     license='MIT',
-    packages=find_packages(exclude=['contrib', 'docs', 'tests']),
+    packages=find_packages(exclude=['contrib', 'docs', 'examples', 'tests']),
     include_package_data=True,
 )
