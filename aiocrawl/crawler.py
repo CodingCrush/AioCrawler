@@ -4,6 +4,7 @@ import async_timeout
 from aiohttp import hdrs
 from datetime import datetime
 from .responses import JsonResponse, HTMLResponse
+from .logger import create_logger
 
 try:
     import uvloop as async_loop
@@ -20,17 +21,20 @@ class AioCrawl(object):
     # aiohttp client session
     ac_session = None
     max_tries = 3
+    debug = False
 
     _bounded_semaphore = None
     _failed_urls = set()
 
-    def __init__(self, loop=None, concurrency=None, timeout=None, **kwargs):
+    def __init__(self, loop=None, concurrency=None, timeout=None,
+                 logger=None, **kwargs):
         if not getattr(self, 'name', None):
             self.name = self.__class__.__name__
         if concurrency is not None:
             self.concurrency = concurrency
         if timeout is not None:
             self.timeout = timeout
+
         if loop is None:
             self.loop = getattr(self, 'loop', None) or \
                         async_loop.new_event_loop()
@@ -38,6 +42,13 @@ class AioCrawl(object):
         else:
             self.loop = loop
         self.ac_session = aiohttp.ClientSession(loop=self.loop)
+
+        if not getattr(self, 'logger', None):
+            if logger is None:
+                self.logger = create_logger(self)
+            else:
+                self.logger = logger
+
         self.__dict__.update(kwargs)
 
     async def on_start(self):
