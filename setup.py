@@ -13,6 +13,7 @@ install_requires = [
     'async_timeout',
     'httptools',
     "lxml",
+    "pyquery",
     'uvloop'
 ]
 

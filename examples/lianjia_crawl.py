@@ -1,5 +1,4 @@
 from aiocrawl import AioCrawl
-from lxml import etree
 
 
 class LianjiaCrawl(AioCrawl):
@@ -12,11 +11,14 @@ class LianjiaCrawl(AioCrawl):
         await self.get(self.urls, callback=self.fetch_houses, sleep=0.5)
 
     async def fetch_houses(self, response):
+        """
+        ['response', 'request', 'doc', 'text', 'pq_doc', 'method', 'headers',
+        'cookies', 'version', 'status', 'reason', 'raw_headers', 'content'
+        ]
+        """
+
         if response.status == 200:
-            text = await response.text()
-            doc = etree.HTML(text)
-            houses_select = '//*[@id="house-lst"]/li'
-            houses = doc.xpath(houses_select)
+            houses = response.xpath('//*[@id="house-lst"]/li')
 
             count = 0
             for house_box in houses:

@@ -3,6 +3,7 @@ import aiohttp
 import async_timeout
 from aiohttp import hdrs
 from datetime import datetime
+from .responses import EnhancedResponse
 
 try:
     import uvloop as async_loop
@@ -52,6 +53,8 @@ class AioCrawl(object):
                 try:
                     with async_timeout.timeout(self.timeout):
                         response = await http_method_request(url, **kwargs)
+                        response = EnhancedResponse(response)
+                        await response.ready()
                     break
                 except aiohttp.ClientError:
                     pass
