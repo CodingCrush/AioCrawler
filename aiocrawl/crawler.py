@@ -3,7 +3,7 @@ import aiohttp
 import async_timeout
 from aiohttp import hdrs
 from datetime import datetime
-from .responses import EnhancedResponse
+from .responses import JsonResponse, HTMLResponse
 
 try:
     import uvloop as async_loop
@@ -53,8 +53,6 @@ class AioCrawl(object):
                 try:
                     with async_timeout.timeout(self.timeout):
                         response = await http_method_request(url, **kwargs)
-                        response = EnhancedResponse(response)
-                        await response.ready()
                     break
                 except aiohttp.ClientError:
                     pass
@@ -64,15 +62,20 @@ class AioCrawl(object):
                 self._failed_urls.add(url)
                 return
             if sleep:
-                print('sleep for {}s'.format(sleep))
                 await asyncio.sleep(sleep)
             if callback:
+                if response.content_type == "application/json":
+                    response = JsonResponse(response)
+                else:
+                    response = HTMLResponse(response)
+                await response.ready()
                 await callback(response)
 
     async def get(self, urls, params=None, callback=None, sleep=None,
                   allow_redirects=True, **kwargs):
         kwargs.update(dict(callback=callback, sleep=sleep,
                            params=params, allow_redirects=allow_redirects))
+        urls = [urls] if isinstance(urls, str) else urls
         await asyncio.gather(*[self._request(
             url, **kwargs, method=hdrs.METH_GET) for url in urls])
 
@@ -80,6 +83,7 @@ class AioCrawl(object):
                    sleep=None, allow_redirects=True, **kwargs):
         kwargs.update(callback=callback, sleep=sleep, data=data,
                       json=json, allow_redirects=allow_redirects)
+        urls = [urls] if isinstance(urls, str) else urls
         await asyncio.gather(*[self._request(
             url, **kwargs, method=hdrs.METH_POST) for url in urls])
 
@@ -87,6 +91,7 @@ class AioCrawl(object):
                     sleep=None, allow_redirects=True, **kwargs):
         kwargs.update(callback=callback, sleep=sleep, data=data,
                       json=json, allow_redirects=allow_redirects)
+        urls = [urls] if isinstance(urls, str) else urls
         await asyncio.gather(*[self._request(
             url, **kwargs, method=hdrs.METH_PATCH) for url in urls])
 
@@ -94,6 +99,7 @@ class AioCrawl(object):
                   sleep=None, allow_redirects=True, **kwargs):
         kwargs.update(callback=callback, sleep=sleep, data=data,
                       json=json, allow_redirects=allow_redirects)
+        urls = [urls] if isinstance(urls, str) else urls
         await asyncio.gather(*[self._request(
             url, **kwargs, method=hdrs.METH_PUT) for url in urls])
 
@@ -101,6 +107,7 @@ class AioCrawl(object):
                    allow_redirects=True, **kwargs):
         kwargs.update(callback=callback, sleep=sleep,
                       allow_redirects=allow_redirects)
+        urls = [urls] if isinstance(urls, str) else urls
         await asyncio.gather(*[self._request(
             url, **kwargs, method=hdrs.METH_HEAD) for url in urls])
 
@@ -108,6 +115,7 @@ class AioCrawl(object):
                      allow_redirects=True, **kwargs):
         kwargs.update(callback=callback, sleep=sleep,
                       allow_redirects=allow_redirects)
+        urls = [urls] if isinstance(urls, str) else urls
         await asyncio.gather(*[self._request(
             url, **kwargs, method=hdrs.METH_DELETE) for url in urls])
 
@@ -115,6 +123,7 @@ class AioCrawl(object):
                       allow_redirects=True, **kwargs):
         kwargs.update(callback=callback, sleep=sleep,
                       allow_redirects=allow_redirects)
+        urls = [urls] if isinstance(urls, str) else urls
         await asyncio.gather(*[self._request(
             url, **kwargs, method=hdrs.METH_OPTIONS) for url in urls])
 
