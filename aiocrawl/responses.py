@@ -9,6 +9,7 @@ class _BaseResponse(object):
             content_type=response.content_type,
             charset=response.charset,
             method=response.method,
+            content=response.content,
             request=response.__dict__["_request_info"],
             url=response.__dict__["_url"],
             status=response.__dict__["status"],

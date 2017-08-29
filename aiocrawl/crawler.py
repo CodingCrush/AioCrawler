@@ -1,6 +1,8 @@
 import asyncio
 import aiohttp
+import aiofiles
 import async_timeout
+import os
 from aiohttp import hdrs
 from datetime import datetime
 from .responses import JsonResponse, HTMLResponse
@@ -11,6 +13,9 @@ try:
     asyncio.set_event_loop_policy(async_loop.EventLoopPolicy())
 except ImportError:
     async_loop = asyncio
+
+working_dir = os.getcwd()
+DOWNLOAD_CHUNK_SIZE = 4096
 
 
 class AioCrawl(object):
@@ -58,7 +63,10 @@ class AioCrawl(object):
         async with self._bounded_semaphore:
             # try max_tries if fail
             method = kwargs.pop('method').lower()
-            http_method_request = getattr(self.ac_session, method)
+            if method == "download":
+                http_method_request = self.ac_session.get
+            else:
+                http_method_request = getattr(self.ac_session, method)
 
             for _ in range(self.max_tries):
                 try:
@@ -72,15 +80,33 @@ class AioCrawl(object):
             else:  # still fail
                 self._failed_urls.add(url)
                 return
-            if sleep:
+            if sleep is not None:
                 await asyncio.sleep(sleep)
-            if callback:
+            if method == "download":
+                return response
+            if callback is not None:
                 if response.content_type == "application/json":
                     response = JsonResponse(response)
                 else:
                     response = HTMLResponse(response)
                 await response.ready()
                 await callback(response)
+
+    async def download(self, url, path=working_dir, filename=None, params=None,
+                       callback=None, sleep=None, allow_redirects=True, **kwargs):
+        file = os.path.join(path, filename)
+        kwargs.update(dict(callback=callback, sleep=sleep,
+                           params=params, allow_redirects=allow_redirects))
+        response = await self._request(url, **kwargs, method="download")
+        if response is None:
+            return
+        async with aiofiles.open(file, 'wb') as fd:
+            while True:
+                chunk = await response.content.read(DOWNLOAD_CHUNK_SIZE)
+                if not chunk:
+                    break
+                await fd.write(chunk)
+                await fd.flush()
 
     async def get(self, urls, params=None, callback=None, sleep=None,
                   allow_redirects=True, **kwargs):
