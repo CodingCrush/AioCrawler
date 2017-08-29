@@ -1,12 +1,15 @@
 import asyncio
+import async_timeout
 import aiohttp
 import aiofiles
-import async_timeout
+import inspect
 import os
 from aiohttp import hdrs
 from datetime import datetime
+from pathlib import Path
 from .responses import JsonResponse, HTMLResponse
 from .logger import create_logger
+from .constants import DOWNLOAD_CHUNK_SIZE, WORKING_DIR
 
 try:
     import uvloop as async_loop
@@ -14,21 +17,16 @@ try:
 except ImportError:
     async_loop = asyncio
 
-working_dir = os.getcwd()
-DOWNLOAD_CHUNK_SIZE = 4096
-
 
 class AioCrawl(object):
     name = None
-    concurrency = 100
+    concurrency = 20
     timeout = 10
     loop = None
-    # aiohttp client session
-    ac_session = None
     max_tries = 3
     debug = False
 
-    _bounded_semaphore = None
+    _semaphore = None
     _failed_urls = set()
 
     def __init__(self, loop=None, concurrency=None, timeout=None,
@@ -37,6 +35,12 @@ class AioCrawl(object):
             self.name = self.__class__.__name__
         if concurrency is not None:
             self.concurrency = concurrency
+
+        # Unlimited Queue for jobs buffer.
+        self._todo_jobs = asyncio.LifoQueue()
+        # TODO: Replaced semaphore with queue
+        self._doing_jobs = asyncio.Queue(self.concurrency)
+
         if timeout is not None:
             self.timeout = timeout
 
@@ -60,14 +64,13 @@ class AioCrawl(object):
         raise NotImplementedError()
 
     async def _request(self, url, callback=None, sleep=None, **kwargs):
-        async with self._bounded_semaphore:
-            # try max_tries if fail
-            method = kwargs.pop('method').lower()
-            if method == "download":
-                http_method_request = self.ac_session.get
-            else:
-                http_method_request = getattr(self.ac_session, method)
+        method = kwargs.pop('method').lower()
+        # used for download
+        file = kwargs.pop("file", None)
+        http_method_request = getattr(self.ac_session, method)
 
+        async with self._semaphore:
+            # try max_tries if fail
             for _ in range(self.max_tries):
                 try:
                     with async_timeout.timeout(self.timeout):
@@ -80,26 +83,43 @@ class AioCrawl(object):
             else:  # still fail
                 self._failed_urls.add(url)
                 return
+
             if sleep is not None:
                 await asyncio.sleep(sleep)
-            if method == "download":
-                return response
-            if callback is not None:
-                if response.content_type == "application/json":
-                    response = JsonResponse(response)
-                else:
-                    response = HTMLResponse(response)
-                await response.ready()
-                await callback(response)
 
-    async def download(self, url, path=working_dir, filename=None, params=None,
-                       callback=None, sleep=None, allow_redirects=True, **kwargs):
-        file = os.path.join(path, filename)
-        kwargs.update(dict(callback=callback, sleep=sleep,
-                           params=params, allow_redirects=allow_redirects))
-        response = await self._request(url, **kwargs, method="download")
-        if response is None:
-            return
+            if callback is None:
+                return
+            if callback is self._download:
+                return await callback(response, file)
+
+            response = await self._wrap_response(response)
+            if inspect.iscoroutinefunction(callback) or inspect.isawaitable(callback):
+                return await callback(response)
+            else:
+                return callback(response)
+
+    @staticmethod
+    async def _wrap_response(response):
+        assert response is not None
+        if response.content_type == "application/json":
+            response = JsonResponse(response)
+        else:
+            response = HTMLResponse(response)
+        await response.ready()
+        return response
+
+    async def download(self, url, save_dir=WORKING_DIR, filename=None, params=None,
+                       sleep=None, allow_redirects=True, **kwargs):
+        # recursively mkdirs, ignore exists
+        path = Path(save_dir)
+        path.mkdir(parents=True, exist_ok=True)
+        file = os.path.join(save_dir, filename)
+        kwargs.update(sleep=sleep, params=params, allow_redirects=allow_redirects, file=file)
+        await self._request(url, **kwargs, method=hdrs.METH_GET, callback=self._download)
+
+    # real download method
+    @staticmethod
+    async def _download(response, file):
         async with aiofiles.open(file, 'wb') as fd:
             while True:
                 chunk = await response.content.read(DOWNLOAD_CHUNK_SIZE)
@@ -108,61 +128,53 @@ class AioCrawl(object):
                 await fd.write(chunk)
                 await fd.flush()
 
+    async def _dispatch_requests(self, urls, method=None, **kwargs):
+        if isinstance(urls, str):
+            urls = [urls]
+        await asyncio.gather(*[self._request(
+            url, **kwargs, method=method) for url in urls])
+
     async def get(self, urls, params=None, callback=None, sleep=None,
                   allow_redirects=True, **kwargs):
-        kwargs.update(dict(callback=callback, sleep=sleep,
-                           params=params, allow_redirects=allow_redirects))
-        urls = [urls] if isinstance(urls, str) else urls
-        await asyncio.gather(*[self._request(
-            url, **kwargs, method=hdrs.METH_GET) for url in urls])
+        kwargs.update(callback=callback, sleep=sleep,
+                      params=params, allow_redirects=allow_redirects)
+        await self._dispatch_requests(urls, method=hdrs.METH_GET, **kwargs)
 
     async def post(self, urls, data=None, json=None, callback=None,
                    sleep=None, allow_redirects=True, **kwargs):
         kwargs.update(callback=callback, sleep=sleep, data=data,
                       json=json, allow_redirects=allow_redirects)
-        urls = [urls] if isinstance(urls, str) else urls
-        await asyncio.gather(*[self._request(
-            url, **kwargs, method=hdrs.METH_POST) for url in urls])
+        await self._dispatch_requests(urls, method=hdrs.METH_POST, **kwargs)
 
     async def patch(self, urls, data=None, json=None, callback=None,
                     sleep=None, allow_redirects=True, **kwargs):
         kwargs.update(callback=callback, sleep=sleep, data=data,
                       json=json, allow_redirects=allow_redirects)
-        urls = [urls] if isinstance(urls, str) else urls
-        await asyncio.gather(*[self._request(
-            url, **kwargs, method=hdrs.METH_PATCH) for url in urls])
+        await self._dispatch_requests(urls, method=hdrs.METH_PATCH, **kwargs)
 
     async def put(self, urls, data=None, json=None, callback=None,
                   sleep=None, allow_redirects=True, **kwargs):
         kwargs.update(callback=callback, sleep=sleep, data=data,
                       json=json, allow_redirects=allow_redirects)
-        urls = [urls] if isinstance(urls, str) else urls
-        await asyncio.gather(*[self._request(
-            url, **kwargs, method=hdrs.METH_PUT) for url in urls])
+        await self._dispatch_requests(urls, method=hdrs.METH_PUT, **kwargs)
 
     async def head(self, urls, callback=None, sleep=None,
                    allow_redirects=True, **kwargs):
         kwargs.update(callback=callback, sleep=sleep,
                       allow_redirects=allow_redirects)
-        urls = [urls] if isinstance(urls, str) else urls
-        await asyncio.gather(*[self._request(
-            url, **kwargs, method=hdrs.METH_HEAD) for url in urls])
+        await self._dispatch_requests(urls, method=hdrs.METH_HEAD, **kwargs)
 
     async def delete(self, urls, callback=None, sleep=None,
                      allow_redirects=True, **kwargs):
         kwargs.update(callback=callback, sleep=sleep,
                       allow_redirects=allow_redirects)
-        urls = [urls] if isinstance(urls, str) else urls
-        await asyncio.gather(*[self._request(
-            url, **kwargs, method=hdrs.METH_DELETE) for url in urls])
+        await self._dispatch_requests(urls, method=hdrs.METH_DELETE, **kwargs)
 
     async def options(self, urls, callback=None, sleep=None,
                       allow_redirects=True, **kwargs):
         kwargs.update(callback=callback, sleep=sleep,
                       allow_redirects=allow_redirects)
-        urls = [urls] if isinstance(urls, str) else urls
-        await asyncio.gather(*[self._request(
-            url, **kwargs, method=hdrs.METH_OPTIONS) for url in urls])
+        await self._dispatch_requests(urls, method=hdrs.METH_OPTIONS, **kwargs)
 
     def _close(self):
         self.ac_session.close()
@@ -174,10 +186,9 @@ class AioCrawl(object):
             self.name, self.concurrency))
 
         try:
-            self._bounded_semaphore = asyncio.BoundedSemaphore(
+            self._semaphore = asyncio.Semaphore(
                 self.concurrency, loop=self.loop
             )
-
             self.loop.run_until_complete(self.on_start())
         except KeyboardInterrupt:
             for task in asyncio.Task.all_tasks():

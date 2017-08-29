@@ -1,0 +1,16 @@
+import os
+
+
+# aio download buffer chunk size: 500kb
+DOWNLOAD_CHUNK_SIZE = 512000
+
+WORKING_DIR = os.getcwd()
+
+
+METHOD_HEAD = 'HEAD'
+METHOD_GET = 'GET'
+METHOD_DELETE = 'DELETE'
+METHOD_OPTIONS = 'OPTIONS'
+METHOD_PATCH = 'PATCH'
+METHOD_POST = 'POST'
+METHOD_PUT = 'PUT'
