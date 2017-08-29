@@ -26,7 +26,6 @@ class AioCrawl(object):
     max_tries = 3
     debug = False
 
-    _semaphore = None
     _failed_urls = set()
 
     def __init__(self, loop=None, concurrency=None, timeout=None,
@@ -36,10 +35,8 @@ class AioCrawl(object):
         if concurrency is not None:
             self.concurrency = concurrency
 
-        # Unlimited Queue for jobs buffer.
-        self._todo_jobs = asyncio.LifoQueue()
-        # TODO: Replaced semaphore with queue
-        self._doing_jobs = asyncio.Queue(self.concurrency)
+        # Unlimited Queue for tasks buffer.
+        self._todo_tasks = asyncio.LifoQueue()
 
         if timeout is not None:
             self.timeout = timeout
@@ -68,35 +65,33 @@ class AioCrawl(object):
         # used for download
         file = kwargs.pop("file", None)
         http_method_request = getattr(self.ac_session, method)
+        # try max_tries if fail
+        for _ in range(self.max_tries):
+            try:
+                with async_timeout.timeout(self.timeout):
+                    response = await http_method_request(url, **kwargs)
+                break
+            except aiohttp.ClientError:
+                pass
+            except asyncio.TimeoutError:
+                pass
+        else:  # still fail
+            self._failed_urls.add(url)
+            return
 
-        async with self._semaphore:
-            # try max_tries if fail
-            for _ in range(self.max_tries):
-                try:
-                    with async_timeout.timeout(self.timeout):
-                        response = await http_method_request(url, **kwargs)
-                    break
-                except aiohttp.ClientError:
-                    pass
-                except asyncio.TimeoutError:
-                    pass
-            else:  # still fail
-                self._failed_urls.add(url)
-                return
+        if sleep is not None:
+            await asyncio.sleep(sleep)
 
-            if sleep is not None:
-                await asyncio.sleep(sleep)
+        if callback is None:
+            return
+        if callback is self._download:
+            return await callback(response, file)
 
-            if callback is None:
-                return
-            if callback is self._download:
-                return await callback(response, file)
-
-            response = await self._wrap_response(response)
-            if inspect.iscoroutinefunction(callback) or inspect.isawaitable(callback):
-                return await callback(response)
-            else:
-                return callback(response)
+        response = await self._wrap_response(response)
+        if inspect.iscoroutinefunction(callback) or inspect.isawaitable(callback):
+            return await callback(response)
+        else:
+            return callback(response)
 
     @staticmethod
     async def _wrap_response(response):
@@ -107,15 +102,6 @@ class AioCrawl(object):
             response = HTMLResponse(response)
         await response.ready()
         return response
-
-    async def download(self, url, save_dir=WORKING_DIR, filename=None, params=None,
-                       sleep=None, allow_redirects=True, **kwargs):
-        # recursively mkdirs, ignore exists
-        path = Path(save_dir)
-        path.mkdir(parents=True, exist_ok=True)
-        file = os.path.join(save_dir, filename)
-        kwargs.update(sleep=sleep, params=params, allow_redirects=allow_redirects, file=file)
-        await self._request(url, **kwargs, method=hdrs.METH_GET, callback=self._download)
 
     # real download method
     @staticmethod
@@ -128,73 +114,101 @@ class AioCrawl(object):
                 await fd.write(chunk)
                 await fd.flush()
 
-    async def _dispatch_requests(self, urls, method=None, **kwargs):
+    async def _produce_request_tasks(self, urls, method=None, **kwargs):
         if isinstance(urls, str):
             urls = [urls]
-        await asyncio.gather(*[self._request(
-            url, **kwargs, method=method) for url in urls])
+        for url in urls:
+            await self._todo_tasks.put(self._request(url, **kwargs, method=method))
+
+    async def download(self, url, save_dir=WORKING_DIR, filename=None, params=None,
+                       sleep=None, allow_redirects=True, **kwargs):
+        # recursively mkdirs, ignore exists
+        path = Path(save_dir)
+        path.mkdir(parents=True, exist_ok=True)
+        file = os.path.join(save_dir, filename)
+        kwargs.update(sleep=sleep, params=params, allow_redirects=allow_redirects, file=file)
+
+        await self._todo_tasks.put(
+            self._request(url, **kwargs, method=hdrs.METH_GET, callback=self._download))
 
     async def get(self, urls, params=None, callback=None, sleep=None,
                   allow_redirects=True, **kwargs):
         kwargs.update(callback=callback, sleep=sleep,
                       params=params, allow_redirects=allow_redirects)
-        await self._dispatch_requests(urls, method=hdrs.METH_GET, **kwargs)
+        await self._produce_request_tasks(urls, method=hdrs.METH_GET, **kwargs)
 
     async def post(self, urls, data=None, json=None, callback=None,
                    sleep=None, allow_redirects=True, **kwargs):
         kwargs.update(callback=callback, sleep=sleep, data=data,
                       json=json, allow_redirects=allow_redirects)
-        await self._dispatch_requests(urls, method=hdrs.METH_POST, **kwargs)
+        await self._produce_request_tasks(urls, method=hdrs.METH_POST, **kwargs)
 
     async def patch(self, urls, data=None, json=None, callback=None,
                     sleep=None, allow_redirects=True, **kwargs):
         kwargs.update(callback=callback, sleep=sleep, data=data,
                       json=json, allow_redirects=allow_redirects)
-        await self._dispatch_requests(urls, method=hdrs.METH_PATCH, **kwargs)
+        await self._produce_request_tasks(urls, method=hdrs.METH_PATCH, **kwargs)
 
     async def put(self, urls, data=None, json=None, callback=None,
                   sleep=None, allow_redirects=True, **kwargs):
         kwargs.update(callback=callback, sleep=sleep, data=data,
                       json=json, allow_redirects=allow_redirects)
-        await self._dispatch_requests(urls, method=hdrs.METH_PUT, **kwargs)
+        await self._produce_request_tasks(urls, method=hdrs.METH_PUT, **kwargs)
 
     async def head(self, urls, callback=None, sleep=None,
                    allow_redirects=True, **kwargs):
         kwargs.update(callback=callback, sleep=sleep,
                       allow_redirects=allow_redirects)
-        await self._dispatch_requests(urls, method=hdrs.METH_HEAD, **kwargs)
+        await self._produce_request_tasks(urls, method=hdrs.METH_HEAD, **kwargs)
 
     async def delete(self, urls, callback=None, sleep=None,
                      allow_redirects=True, **kwargs):
         kwargs.update(callback=callback, sleep=sleep,
                       allow_redirects=allow_redirects)
-        await self._dispatch_requests(urls, method=hdrs.METH_DELETE, **kwargs)
+        await self._produce_request_tasks(urls, method=hdrs.METH_DELETE, **kwargs)
 
     async def options(self, urls, callback=None, sleep=None,
                       allow_redirects=True, **kwargs):
         kwargs.update(callback=callback, sleep=sleep,
                       allow_redirects=allow_redirects)
-        await self._dispatch_requests(urls, method=hdrs.METH_OPTIONS, **kwargs)
+        await self._produce_request_tasks(urls, method=hdrs.METH_OPTIONS, **kwargs)
 
-    def _close(self):
-        self.ac_session.close()
-        self.loop.close()
+    async def workers(self):
+        # produce as much tasks as possible.
+        while True:
+            try:
+                await self._todo_tasks.get_nowait()
+                self._todo_tasks.task_done()
+            except asyncio.CancelledError:
+                pass
+            except asyncio.QueueEmpty:
+                asyncio.sleep(0.5)
+                if not self._todo_tasks.qsize():
+                    break
+
+    async def work(self):
+        await self.on_start()
+        workers = [
+            asyncio.Task(self.workers(), loop=self.loop)
+            for _ in range(self.concurrency)
+        ]
+
+        await self._todo_tasks.join()
+        for w in workers:
+            w.cancel()
 
     def run(self):
         start_at = datetime.now()
-        print('Acrawl task:{} started with concurrency:{}'.format(
+        print('Aiocrawl task:{} started with concurrency:{}'.format(
             self.name, self.concurrency))
-
         try:
-            self._semaphore = asyncio.Semaphore(
-                self.concurrency, loop=self.loop
-            )
-            self.loop.run_until_complete(self.on_start())
+            self.loop.run_until_complete(self.work())
         except KeyboardInterrupt:
             for task in asyncio.Task.all_tasks():
                 task.cancel()
         finally:
             end_at = datetime.now()
-            print('Acrawl task:{} finished in {} seconds'.format(
+            print('Aiocrawl task:{} finished in {} seconds'.format(
                 self.name, (end_at-start_at).total_seconds()))
-            self._close()
+            self.ac_session.close()
+            self.loop.close()
