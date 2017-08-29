@@ -4,16 +4,15 @@ import aiohttp
 import aiofiles
 import inspect
 import os
-from aiohttp import hdrs
 from datetime import datetime
 from pathlib import Path
 from .responses import JsonResponse, HTMLResponse
 from .logger import create_logger
-from .constants import DOWNLOAD_CHUNK_SIZE, WORKING_DIR
+from .constants import DOWNLOAD_CHUNK_SIZE, WORKING_DIR, METHOD_DELETE, METHOD_GET, METHOD_HEAD, \
+    METHOD_OPTIONS, METHOD_PATCH, METHOD_POST, METHOD_PUT
 
 try:
     import uvloop as async_loop
-    asyncio.set_event_loop_policy(async_loop.EventLoopPolicy())
 except ImportError:
     async_loop = asyncio
 
@@ -27,27 +26,26 @@ class AioCrawl(object):
     debug = False
 
     _failed_urls = set()
+    _seen_urls = set()
 
-    def __init__(self, loop=None, concurrency=None, timeout=None,
-                 logger=None, **kwargs):
+    def __init__(self, loop=None, concurrency=None, timeout=None, logger=None, **kwargs):
         if not getattr(self, 'name', None):
             self.name = self.__class__.__name__
         if concurrency is not None:
             self.concurrency = concurrency
 
-        # Unlimited Queue for tasks buffer.
-        self._todo_tasks = asyncio.LifoQueue()
-
         if timeout is not None:
             self.timeout = timeout
 
         if loop is None:
-            self.loop = getattr(self, 'loop', None) or \
-                        async_loop.new_event_loop()
+            self.loop = getattr(self, 'loop', None) or async_loop.new_event_loop()
             asyncio.set_event_loop(loop)
         else:
             self.loop = loop
         self.ac_session = aiohttp.ClientSession(loop=self.loop)
+
+        # Tasks Queue for Future objects.
+        self._tasks_que = asyncio.LifoQueue(loop=self.loop)
 
         if not getattr(self, 'logger', None):
             if logger is None:
@@ -57,24 +55,25 @@ class AioCrawl(object):
 
         self.__dict__.update(kwargs)
 
-    async def on_start(self):
+    def on_start(self):
         raise NotImplementedError()
 
     async def _request(self, url, callback=None, sleep=None, **kwargs):
-        method = kwargs.pop('method').lower()
+        method = kwargs.pop('method')
         # used for download
         file = kwargs.pop("file", None)
-        http_method_request = getattr(self.ac_session, method)
+        http_method_request = getattr(self.ac_session, method.lower())
         # try max_tries if fail
         for _ in range(self.max_tries):
             try:
                 with async_timeout.timeout(self.timeout):
                     response = await http_method_request(url, **kwargs)
+                    self._seen_urls.add(url)
                 break
             except aiohttp.ClientError:
-                pass
+                self.logger.debug("{} {} ClientError".format(method, url))
             except asyncio.TimeoutError:
-                pass
+                self.logger.debug("{} {} TimeoutError".format(method, url))
         else:  # still fail
             self._failed_urls.add(url)
             return
@@ -114,92 +113,79 @@ class AioCrawl(object):
                 await fd.write(chunk)
                 await fd.flush()
 
-    async def _produce_request_tasks(self, urls, method=None, **kwargs):
-        if isinstance(urls, str):
-            urls = [urls]
-        for url in urls:
-            await self._todo_tasks.put(self._request(url, **kwargs, method=method))
-
-    async def download(self, url, save_dir=WORKING_DIR, filename=None, params=None,
-                       sleep=None, allow_redirects=True, **kwargs):
+    def download(self, url, save_dir=WORKING_DIR, filename=None, params=None,
+                 sleep=None, allow_redirects=True, **kwargs):
         # recursively mkdirs, ignore exists
         path = Path(save_dir)
         path.mkdir(parents=True, exist_ok=True)
         file = os.path.join(save_dir, filename)
         kwargs.update(sleep=sleep, params=params, allow_redirects=allow_redirects, file=file)
 
-        await self._todo_tasks.put(
-            self._request(url, **kwargs, method=hdrs.METH_GET, callback=self._download))
+        self._tasks_que.put_nowait(
+            self._request(url, **kwargs, method=METHOD_GET, callback=self._download))
 
-    async def get(self, urls, params=None, callback=None, sleep=None,
-                  allow_redirects=True, **kwargs):
-        kwargs.update(callback=callback, sleep=sleep,
-                      params=params, allow_redirects=allow_redirects)
-        await self._produce_request_tasks(urls, method=hdrs.METH_GET, **kwargs)
+    def get(self, urls, params=None, callback=None, sleep=None, allow_redirects=True, **kwargs):
+        kwargs.update(callback=callback, sleep=sleep, params=params, allow_redirects=allow_redirects)
+        self._produce_request_tasks(urls, method=METHOD_GET, **kwargs)
 
-    async def post(self, urls, data=None, json=None, callback=None,
-                   sleep=None, allow_redirects=True, **kwargs):
-        kwargs.update(callback=callback, sleep=sleep, data=data,
-                      json=json, allow_redirects=allow_redirects)
-        await self._produce_request_tasks(urls, method=hdrs.METH_POST, **kwargs)
+    def post(self, urls, data=None, json=None, callback=None, sleep=None, allow_redirects=True, **kwargs):
+        kwargs.update(callback=callback, sleep=sleep, data=data, json=json, allow_redirects=allow_redirects)
+        self._produce_request_tasks(urls, method=METHOD_POST, **kwargs)
 
-    async def patch(self, urls, data=None, json=None, callback=None,
-                    sleep=None, allow_redirects=True, **kwargs):
-        kwargs.update(callback=callback, sleep=sleep, data=data,
-                      json=json, allow_redirects=allow_redirects)
-        await self._produce_request_tasks(urls, method=hdrs.METH_PATCH, **kwargs)
+    def patch(self, urls, data=None, json=None, callback=None, sleep=None, allow_redirects=True, **kwargs):
+        kwargs.update(callback=callback, sleep=sleep, data=data, json=json, allow_redirects=allow_redirects)
+        self._produce_request_tasks(urls, method=METHOD_PATCH, **kwargs)
 
-    async def put(self, urls, data=None, json=None, callback=None,
-                  sleep=None, allow_redirects=True, **kwargs):
-        kwargs.update(callback=callback, sleep=sleep, data=data,
-                      json=json, allow_redirects=allow_redirects)
-        await self._produce_request_tasks(urls, method=hdrs.METH_PUT, **kwargs)
+    def put(self, urls, data=None, json=None, callback=None, sleep=None, allow_redirects=True, **kwargs):
+        kwargs.update(callback=callback, sleep=sleep, data=data, json=json, allow_redirects=allow_redirects)
+        self._produce_request_tasks(urls, method=METHOD_PUT, **kwargs)
 
-    async def head(self, urls, callback=None, sleep=None,
-                   allow_redirects=True, **kwargs):
-        kwargs.update(callback=callback, sleep=sleep,
-                      allow_redirects=allow_redirects)
-        await self._produce_request_tasks(urls, method=hdrs.METH_HEAD, **kwargs)
+    def head(self, urls, callback=None, sleep=None, allow_redirects=True, **kwargs):
+        kwargs.update(callback=callback, sleep=sleep, allow_redirects=allow_redirects)
+        self._produce_request_tasks(urls, method=METHOD_HEAD, **kwargs)
 
-    async def delete(self, urls, callback=None, sleep=None,
-                     allow_redirects=True, **kwargs):
-        kwargs.update(callback=callback, sleep=sleep,
-                      allow_redirects=allow_redirects)
-        await self._produce_request_tasks(urls, method=hdrs.METH_DELETE, **kwargs)
+    def delete(self, urls, callback=None, sleep=None, allow_redirects=True, **kwargs):
+        kwargs.update(callback=callback, sleep=sleep, allow_redirects=allow_redirects)
+        self._produce_request_tasks(urls, method=METHOD_DELETE, **kwargs)
 
-    async def options(self, urls, callback=None, sleep=None,
-                      allow_redirects=True, **kwargs):
-        kwargs.update(callback=callback, sleep=sleep,
-                      allow_redirects=allow_redirects)
-        await self._produce_request_tasks(urls, method=hdrs.METH_OPTIONS, **kwargs)
+    def options(self, urls, callback=None, sleep=None, allow_redirects=True, **kwargs):
+        kwargs.update(callback=callback, sleep=sleep, allow_redirects=allow_redirects)
+        self._produce_request_tasks(urls, method=METHOD_OPTIONS, **kwargs)
+
+    def _produce_request_tasks(self, urls, method=None, **kwargs):
+        if isinstance(urls, str):
+            urls = [urls]
+        for url in urls:
+            self._tasks_que.put_nowait(self._request(url, **kwargs, method=method))
 
     async def workers(self):
         # produce as much tasks as possible.
         while True:
             try:
-                await self._todo_tasks.get_nowait()
-                self._todo_tasks.task_done()
+                await self._tasks_que.get_nowait()
+                self._tasks_que.task_done()
             except asyncio.CancelledError:
                 pass
             except asyncio.QueueEmpty:
                 asyncio.sleep(0.5)
-                if not self._todo_tasks.qsize():
+                if not self._tasks_que.qsize():
                     break
 
     async def work(self):
-        await self.on_start()
+        self.on_start()
+        
         workers = [
             asyncio.Task(self.workers(), loop=self.loop)
             for _ in range(self.concurrency)
         ]
 
-        await self._todo_tasks.join()
+        await self._tasks_que.join()
         for w in workers:
             w.cancel()
 
     def run(self):
         start_at = datetime.now()
-        print('Aiocrawl task:{} started with concurrency:{}'.format(
+        self.logger.info('Aiocrawl task:{} started with concurrency:{}'.format(
             self.name, self.concurrency))
         try:
             self.loop.run_until_complete(self.work())
@@ -208,7 +194,10 @@ class AioCrawl(object):
                 task.cancel()
         finally:
             end_at = datetime.now()
-            print('Aiocrawl task:{} finished in {} seconds'.format(
-                self.name, (end_at-start_at).total_seconds()))
+            self.logger.info('Aiocrawl task:{} finished in {} seconds. Success:{}, Failure:{}'.format(
+                self.name, (end_at-start_at).total_seconds(), len(self._seen_urls), len(self._failed_urls)))
             self.ac_session.close()
             self.loop.close()
+
+    def __call__(self, *args, **kwargs):
+        self.run()

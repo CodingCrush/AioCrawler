@@ -4,14 +4,14 @@ import os
 
 class QisuuDownloadCrawl(AioCrawl):
     concurrency = 100
-    urls = ("http://www.qisuu.com/Shtml{}.html".format(count) for count in range(1, 100))
-    timeout = 100
+    urls = ("http://www.qisuu.com/Shtml{}.html".format(count) for count in range(1, 20000))
+    timeout = 300
     debug = True
 
-    async def on_start(self):
-        await self.get(self.urls, callback=self.parse_book)
+    def on_start(self):
+        self.get(self.urls, callback=self.parse_book)
 
-    async def parse_book(self, response):
+    def parse_book(self, response):
         try:
             book_select = response.xpath("/html/body/div[4]/div[2]")[0]
         except IndexError:
@@ -25,12 +25,12 @@ class QisuuDownloadCrawl(AioCrawl):
         txt_url = book_select.xpath("div[3]/div[2]/ul/li[2]/a/@href")[0]
         filename = " ".join((name, author)) + ".txt"
         save_dir = os.path.join(
-            "test-download",
-            "/".join(element.text for element in response.xpath("/html/body/div[3]/span/a")[1:-1])
+            "download", "/".join(element.text for element in response.xpath("/html/body/div[3]/span/a")[1:-1])
         )
 
         self.logger.debug(os.path.join(save_dir, filename))
-        await self.download(txt_url, save_dir=save_dir, filename=filename)
+
+        self.download(txt_url, save_dir=save_dir, filename=filename)
 
 
 if __name__ == "__main__":
