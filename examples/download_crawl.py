@@ -3,15 +3,19 @@ import os
 
 
 class QisuuDownloadCrawl(AioCrawl):
-    concurrency = 100
-    urls = ("http://www.qisuu.com/Shtml{}.html".format(count) for count in range(1, 20000))
-    timeout = 300
+    concurrency = 50
+    urls = ("http://www.qisuu.com/Shtml{}.html".format(count) for count in range(1, 30000))
+    timeout = 500
     debug = True
 
     def on_start(self):
         self.get(self.urls, callback=self.parse_book)
 
     def parse_book(self, response):
+        if not response.status == 200:
+            print("{}:{}".format(response.url, response.status))
+            return
+
         try:
             book_select = response.xpath("/html/body/div[4]/div[2]")[0]
         except IndexError:
