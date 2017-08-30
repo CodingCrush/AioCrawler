@@ -9,7 +9,7 @@ from pathlib import Path
 from .responses import JsonResponse, HTMLResponse
 from .logger import create_logger
 from .constants import DOWNLOAD_CHUNK_SIZE, WORKING_DIR, METHOD_DELETE, METHOD_GET, METHOD_HEAD, \
-    METHOD_OPTIONS, METHOD_PATCH, METHOD_POST, METHOD_PUT
+    METHOD_OPTIONS, METHOD_PATCH, METHOD_POST, METHOD_PUT, DEFAULT_TIMEOUT, DEFAULT_CONCURRENCY, DEFAULT_MAX_TRIES
 
 try:
     import uvloop as async_loop
@@ -19,10 +19,10 @@ except ImportError:
 
 class AioCrawl(object):
     name = None
-    concurrency = 20
-    timeout = 10
+    concurrency = DEFAULT_CONCURRENCY
+    timeout = DEFAULT_TIMEOUT
+    max_tries = DEFAULT_MAX_TRIES
     loop = None
-    max_tries = 3
     debug = False
 
     _failed_urls = set()
@@ -43,8 +43,7 @@ class AioCrawl(object):
         else:
             self.loop = loop
         self.ac_session = aiohttp.ClientSession(loop=self.loop)
-
-        # Tasks Queue for Future objects.
+        # Lifo Queue for Stashing all tasks to be done.
         self._tasks_que = asyncio.LifoQueue(loop=self.loop)
 
         if not getattr(self, 'logger', None):
@@ -159,17 +158,10 @@ class AioCrawl(object):
             self._tasks_que.put_nowait(self._request(url, **kwargs, method=method))
 
     async def workers(self):
-        # produce as much tasks as possible.
         while True:
-            try:
-                await self._tasks_que.get_nowait()
-                self._tasks_que.task_done()
-            except asyncio.CancelledError:
-                pass
-            except asyncio.QueueEmpty:
-                asyncio.sleep(0.5)
-                if not self._tasks_que.qsize():
-                    break
+            task = await self._tasks_que.get()
+            await task
+            self._tasks_que.task_done()
 
     async def work(self):
         self.on_start()
@@ -180,8 +172,8 @@ class AioCrawl(object):
         ]
 
         await self._tasks_que.join()
-        for w in workers:
-            w.cancel()
+        for worker in workers:
+            worker.cancel()
 
     def run(self):
         start_at = datetime.now()
@@ -192,6 +184,8 @@ class AioCrawl(object):
         except KeyboardInterrupt:
             for task in asyncio.Task.all_tasks():
                 task.cancel()
+        except asyncio.CancelledError:
+            pass  # All tasks has been cancelled
         finally:
             end_at = datetime.now()
             self.logger.info('Aiocrawl task:{} finished in {} seconds. Success:{}, Failure:{}'.format(

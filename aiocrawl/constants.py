@@ -4,6 +4,10 @@ import os
 # aio download buffer chunk size: 500kb
 DOWNLOAD_CHUNK_SIZE = 512000
 
+DEFAULT_TIMEOUT = 20
+DEFAULT_CONCURRENCY = 20
+DEFAULT_MAX_TRIES = 3
+
 WORKING_DIR = os.getcwd()
 
 
