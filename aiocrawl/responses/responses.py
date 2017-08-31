@@ -33,7 +33,7 @@ class JsonResponse(_BaseResponse):
         self.json = await self.json()
 
 
-class HTMLResponse(_BaseResponse):
+class HtmlResponse(_BaseResponse):
 
     def __init__(self, response=None):
         super(self.__class__, self).__init__(response=response)
@@ -65,3 +65,7 @@ class HTMLResponse(_BaseResponse):
 
     def selector(self, rule):
         return self.p_doc(rule)
+
+
+class XmlResponse(HtmlResponse):
+    pass

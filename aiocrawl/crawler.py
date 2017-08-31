@@ -6,7 +6,7 @@ import inspect
 import os
 from datetime import datetime
 from pathlib import Path
-from .responses import JsonResponse, HTMLResponse
+from .responses import wrap_response
 from .logger import create_logger
 from .constants import DOWNLOAD_CHUNK_SIZE, WORKING_DIR, METHOD_DELETE, \
     METHOD_GET, METHOD_HEAD, METHOD_OPTIONS, METHOD_PATCH, METHOD_POST, \
@@ -88,22 +88,13 @@ class AioCrawl(object):
         if callback is self._download:
             return await callback(response, file)
 
-        response = await self._wrap_response(response)
+        response = await wrap_response(response)
+
         if inspect.iscoroutinefunction(callback) or \
                 inspect.isawaitable(callback):
             return await callback(response)
         else:
             return callback(response)
-
-    @staticmethod
-    async def _wrap_response(response):
-        assert response is not None
-        if response.content_type == "application/json":
-            response = JsonResponse(response)
-        else:
-            response = HTMLResponse(response)
-        await response.ready()
-        return response
 
     # real download method
     @staticmethod
