@@ -5,7 +5,7 @@ from .responses import HtmlResponse, JsonResponse, XmlResponse
 
 class ResponseTypes(object):
 
-    _CONTENT_TYPE_TO_RESPONSE = {
+    CONTENT_TYPES = {
         'text/html': HtmlResponse,
         'application/atom+xml': XmlResponse,
         'application/rdf+xml': XmlResponse,
@@ -22,40 +22,46 @@ class ResponseTypes(object):
         'text/*': HtmlResponse,
     }
 
-    def _lookup(self, response):
-        assert isinstance(response, ParResponse)
+    @classmethod
+    def lookup(cls, raw_response):
+        assert isinstance(raw_response, ParResponse)
         try:
-            return self._lookup_mime_type(response)
+            return cls._lookup_mime_type(raw_response)
         except KeyError:
-            try:
-                return self._lookup_content_type(response)
-            except KeyError:
-                pass
+            pass
+        try:
+            return cls._lookup_header_content_type(raw_response)
+        except KeyError:
+            pass
+        try:
+            return cls._lookup_content_type(raw_response)
+        except KeyError:
+            pass
+        return HtmlResponse
 
-        return self._default_type(response)
+    @classmethod
+    def _lookup_mime_type(cls, raw_response):
+        guessed_type, _ = guess_type(str(raw_response.url))
+        return cls.CONTENT_TYPES[guessed_type]
 
-    def _lookup_mime_type(self, response):
-        guessed_type, _ = guess_type(str(response.url))
-        return self._CONTENT_TYPE_TO_RESPONSE[guessed_type](response)
+    @classmethod
+    def _lookup_header_content_type(cls, raw_response):
+        found_content_type = None
+        # if not exists, .get_all() raise KeyError
+        for content_type in raw_response.headers.getall("Content-Type"):
+            if content_type in cls.CONTENT_TYPES:
+                found_content_type = content_type
+                break
+        return cls.CONTENT_TYPES[found_content_type]
 
-    def _lookup_content_type(self, response):
-        content_type = response.content_type
-        return self._CONTENT_TYPE_TO_RESPONSE[content_type](response)
+    @classmethod
+    def _lookup_content_type(cls, raw_response):
+        content_type = raw_response.content_type
+        return cls.CONTENT_TYPES[content_type]
 
-    @staticmethod
-    def _default_type(response):
-        return HtmlResponse(response)
-
-    @staticmethod
-    async def _ready(selected):
-        if isinstance(selected, JsonResponse):
-            selected.json = await selected.json()
-        else:
-            selected.text = await selected.text()
-        return selected
-
-    async def select(self, response):
-        selected = self._lookup(response)
-        return await self._ready(selected)
-
-response_types = ResponseTypes()
+    @classmethod
+    async def construct(cls, raw_response):
+        factory_cls = cls.lookup(raw_response)
+        response = factory_cls(raw_response)
+        response.text = await response.text()
+        return response

@@ -5,6 +5,7 @@ import aiofiles
 import inspect
 import os
 from datetime import datetime
+from urllib import parse as urlparse
 from pathlib import Path
 from .responses import wrap_response
 from .logger import create_logger
@@ -24,77 +25,79 @@ class AioCrawl(object):
     timeout = DEFAULT_TIMEOUT
     max_tries = DEFAULT_MAX_TRIES
     loop = None
+    logger = None
     debug = False
 
     _failed_urls = set()
     _seen_urls = set()
 
-    def __init__(self, loop=None, concurrency=None, timeout=None,
-                 logger=None, **kwargs):
-        if not getattr(self, 'name', None):
-            self.name = self.__class__.__name__
-        if concurrency is not None:
-            self.concurrency = concurrency
+    def __init__(self, **kwargs):
+        self.name = getattr(self, 'name') or self.__class__.__name__
 
-        if timeout is not None:
-            self.timeout = timeout
+        self.loop = getattr(self, 'loop') or async_loop.new_event_loop()
+        asyncio.set_event_loop(self.loop)
 
-        if loop is None:
-            self.loop = getattr(self, 'loop', None) or \
-                        async_loop.new_event_loop()
-            asyncio.set_event_loop(loop)
-        else:
-            self.loop = loop
         self.ac_session = aiohttp.ClientSession(loop=self.loop)
+
         # Lifo Queue for Stashing all tasks to be done.
         self._tasks_que = asyncio.LifoQueue(loop=self.loop)
 
-        if not getattr(self, 'logger', None):
-            if logger is None:
-                self.logger = create_logger(self)
-            else:
-                self.logger = logger
+        self.logger = getattr(self, 'logger') or create_logger(self)
 
         self.__dict__.update(kwargs)
 
     def on_start(self):
         raise NotImplementedError()
 
-    async def _request(self, url, callback=None, sleep=None, **kwargs):
-        method = kwargs.pop('method')
-        # used for download
-        file = kwargs.pop("file", None)
+    @staticmethod
+    def get_request_url(url, params):
+        if params is None:
+            params = {}
+        url_parts = list(urlparse.urlparse(url))
+        query = dict(urlparse.parse_qsl(url_parts[4]))
+        query.update(params)
+        url_parts[4] = urlparse.urlencode(query)
+        return urlparse.urlunparse(url_parts)
+
+    async def _request(self, url, parser=None, sleep=None, method=None,
+                       file=None, **kwargs):
         http_method_request = getattr(self.ac_session, method.lower())
+        this_request_url = self.get_request_url(url, kwargs.get('params'))
+
         # try max_tries if fail
         for _ in range(self.max_tries):
             try:
                 with async_timeout.timeout(self.timeout):
                     response = await http_method_request(url, **kwargs)
-                    self._seen_urls.add(url)
+                    self._seen_urls.add(this_request_url)
                 break
             except aiohttp.ClientError:
-                self.logger.debug("{} {} ClientError".format(method, url))
+                self.logger.error("{} {} ClientError".format(
+                    method, this_request_url)
+                )
             except asyncio.TimeoutError:
-                self.logger.debug("{} {} TimeoutError".format(method, url))
+                self.logger.error("{} {} TimeoutError".format(
+                    method, this_request_url)
+                )
         else:  # still fail
-            self._failed_urls.add(url)
+            self._failed_urls.add(this_request_url)
             return
 
         if sleep is not None:
             await asyncio.sleep(sleep)
 
-        if callback is None:
+        if parser is None:
             return
-        if callback is self._download:
-            return await callback(response, file)
+        if parser is self._download:
+            return await parser(response, file)
 
         response = await wrap_response(response)
 
-        if inspect.iscoroutinefunction(callback) or \
-                inspect.isawaitable(callback):
-            return await callback(response)
+        if inspect.iscoroutinefunction(parser) or \
+                inspect.isawaitable(parser):
+            return await parser(response)
         else:
-            return callback(response)
+            return parser(response)
 
     # real download method
     @staticmethod
@@ -118,47 +121,47 @@ class AioCrawl(object):
 
         self._tasks_que.put_nowait(
             self._request(url, **kwargs, method=METHOD_GET,
-                          callback=self._download))
+                          parser=self._download))
 
-    def get(self, urls, params=None, callback=None,
+    def get(self, urls, params=None, parser=None,
             sleep=None, allow_redirects=True, **kwargs):
-        kwargs.update(callback=callback, sleep=sleep,
+        kwargs.update(parser=parser, sleep=sleep,
                       params=params, allow_redirects=allow_redirects)
         self._produce_request_tasks(urls, method=METHOD_GET, **kwargs)
 
-    def post(self, urls, data=None, json=None, callback=None,
+    def post(self, urls, data=None, json=None, parser=None,
              sleep=None, allow_redirects=True, **kwargs):
-        kwargs.update(callback=callback, sleep=sleep, data=data,
+        kwargs.update(parser=parser, sleep=sleep, data=data,
                       json=json, allow_redirects=allow_redirects)
         self._produce_request_tasks(urls, method=METHOD_POST, **kwargs)
 
-    def patch(self, urls, data=None, json=None, callback=None,
+    def patch(self, urls, data=None, json=None, parser=None,
               sleep=None, allow_redirects=True, **kwargs):
-        kwargs.update(callback=callback, sleep=sleep, data=data,
+        kwargs.update(parser=parser, sleep=sleep, data=data,
                       json=json, allow_redirects=allow_redirects)
         self._produce_request_tasks(urls, method=METHOD_PATCH, **kwargs)
 
-    def put(self, urls, data=None, json=None, callback=None,
+    def put(self, urls, data=None, json=None, parser=None,
             sleep=None, allow_redirects=True, **kwargs):
-        kwargs.update(callback=callback, sleep=sleep, data=data,
+        kwargs.update(parser=parser, sleep=sleep, data=data,
                       json=json, allow_redirects=allow_redirects)
         self._produce_request_tasks(urls, method=METHOD_PUT, **kwargs)
 
-    def head(self, urls, callback=None, sleep=None,
+    def head(self, urls, parser=None, sleep=None,
              allow_redirects=True, **kwargs):
-        kwargs.update(callback=callback, sleep=sleep,
+        kwargs.update(parser=parser, sleep=sleep,
                       allow_redirects=allow_redirects)
         self._produce_request_tasks(urls, method=METHOD_HEAD, **kwargs)
 
-    def delete(self, urls, callback=None, sleep=None,
+    def delete(self, urls, parser=None, sleep=None,
                allow_redirects=True, **kwargs):
-        kwargs.update(callback=callback, sleep=sleep,
+        kwargs.update(parser=parser, sleep=sleep,
                       allow_redirects=allow_redirects)
         self._produce_request_tasks(urls, method=METHOD_DELETE, **kwargs)
 
-    def options(self, urls, callback=None, sleep=None,
+    def options(self, urls, parser=None, sleep=None,
                 allow_redirects=True, **kwargs):
-        kwargs.update(callback=callback, sleep=sleep,
+        kwargs.update(parser=parser, sleep=sleep,
                       allow_redirects=allow_redirects)
         self._produce_request_tasks(urls, method=METHOD_OPTIONS, **kwargs)
 
@@ -190,7 +193,7 @@ class AioCrawl(object):
 
     def run(self):
         start_at = datetime.now()
-        self.logger.info('Aiocrawl task:{} started, Concurrency:{}'.format(
+        self.logger.info('AioCrawl task:{} started, Concurrency:{}'.format(
             self.name, self.concurrency))
         try:
             self.loop.run_until_complete(self.work())
@@ -202,7 +205,7 @@ class AioCrawl(object):
         finally:
             end_at = datetime.now()
             self.logger.info(
-                'Aiocrawl task:{} finished in {} seconds.'
+                'AioCrawl task:{} finished in {} seconds.'
                 'Success:{}, Failure:{}'.format(
                     self.name, (end_at-start_at).total_seconds(),
                     len(self._seen_urls), len(self._failed_urls))

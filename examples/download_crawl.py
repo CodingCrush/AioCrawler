@@ -9,7 +9,7 @@ class QisuuDownloadCrawl(AioCrawl):
     debug = True
 
     def on_start(self):
-        self.get(self.urls, callback=self.parse_book)
+        self.get(self.urls, parser=self.parse_book)
 
     def parse_book(self, response):
         if not response.status == 200:

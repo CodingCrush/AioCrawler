@@ -5,3 +5,4 @@ __pycache__/
 aiocrawl.egg-info/
 build/
 dist/
+download/

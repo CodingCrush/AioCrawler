@@ -8,7 +8,7 @@ class DemoCrawl(AioCrawl):
     debug = True
 
     def on_start(self):
-        self.get(self.urls, callback=self.parse, sleep=0.2)
+        self.get(self.urls, parser=self.parse, sleep=0.2)
 
     def parse(self, response):
         """
