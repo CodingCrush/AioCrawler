@@ -1,11 +1,6 @@
-from aiohttp.web_response import Response as ParResponse
+from aiohttp.client import ClientResponse as ParResponse
 from mimetypes import guess_type
 from .responses import HtmlResponse, JsonResponse, XmlResponse
-
-
-async def wrap_response(response):
-    wrapped_response = ResponseTypes(response)
-    return await wrapped_response.ready()
 
 
 class ResponseTypes(object):
@@ -27,47 +22,40 @@ class ResponseTypes(object):
         'text/*': HtmlResponse,
     }
 
-    def __init__(self, response):
-        self._response = response
-
-    def lookup(self):
-        assert issubclass(self._response, ParResponse)
+    def _lookup(self, response):
+        assert isinstance(response, ParResponse)
         try:
-            return self.lookup_mime_type()
+            return self._lookup_mime_type(response)
         except KeyError:
             try:
-                return self.lookup_content_type()
+                return self._lookup_content_type(response)
             except KeyError:
                 pass
 
-        return self.default_type()
+        return self._default_type(response)
 
-    def lookup_mime_type(self):
-        guessed_type, _ = guess_type(self._response)
-        if guessed_type is not None:
-            try:
-                url = self._response.url
-                return self._CONTENT_TYPE_TO_RESPONSE[guessed_type](url)
-            except KeyError:
-                pass
+    def _lookup_mime_type(self, response):
+        guessed_type, _ = guess_type(str(response.url))
+        return self._CONTENT_TYPE_TO_RESPONSE[guessed_type](response)
+
+    def _lookup_content_type(self, response):
+        content_type = response.content_type
+        return self._CONTENT_TYPE_TO_RESPONSE[content_type](response)
+
+    @staticmethod
+    def _default_type(response):
+        return HtmlResponse(response)
+
+    @staticmethod
+    async def _ready(selected):
+        if isinstance(selected, JsonResponse):
+            selected.json = await selected.json()
         else:
-            raise KeyError
+            selected.text = await selected.text()
+        return selected
 
-    def lookup_content_type(self):
-        try:
-            content_type = self._response.content_type
-            return self._CONTENT_TYPE_TO_RESPONSE[content_type](self._response)
-        except KeyError:
-            pass
+    async def select(self, response):
+        selected = self._lookup(response)
+        return await self._ready(selected)
 
-    def default_type(self):
-        return HtmlResponse(self._response)
-
-    async def ready(self):
-        self.lookup()
-
-        if isinstance(self._response, JsonResponse):
-            self._response.json = await self._response.json()
-        else:
-            self._response.text = await self._response.text()
-        return self._response
+response_types = ResponseTypes()

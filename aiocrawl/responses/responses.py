@@ -1,3 +1,4 @@
+import io
 from lxml import etree
 from pyquery import PyQuery
 
@@ -10,16 +11,28 @@ class _BaseResponse(object):
             charset=response.charset,
             method=response.method,
             content=response.content,
-            request=response.__dict__["_request_info"],
+            request_info=response.__dict__["_request_info"],
             url=response.__dict__["_url"],
             status=response.__dict__["status"],
             cookies=response.__dict__["cookies"],
             headers=response.__dict__["headers"],
-            raw_headers=response.__dict__["raw_headers"]
+            raw_headers=response.__dict__["raw_headers"],
+            reason=response.reason
         )
 
-    async def ready(self):
-        raise NotImplementedError
+    def __repr__(self):
+        out = io.StringIO()
+        ascii_encodable_url = str(self.url)
+        if self.reason:
+            ascii_encodable_reason = self.reason.encode(
+                'ascii', 'backslashreplace').decode('ascii')
+        else:
+            ascii_encodable_reason = self.reason
+        print('<{}({}) [{} {}]>'.format(
+            self.__class__.__name__,
+            ascii_encodable_url, self.status, ascii_encodable_reason),
+            file=out)
+        return out.getvalue()
 
 
 class JsonResponse(_BaseResponse):
@@ -28,9 +41,6 @@ class JsonResponse(_BaseResponse):
         super(self.__class__, self).__init__(response=response)
         self.json = response.json
         self.type = "json"
-
-    async def ready(self):
-        self.json = await self.json()
 
 
 class HtmlResponse(_BaseResponse):
@@ -41,9 +51,6 @@ class HtmlResponse(_BaseResponse):
         self._e_doc = None
         self._p_doc = None
         self.type = "html"
-
-    async def ready(self):
-        self.text = await self.text()
 
     @property
     def e_doc(self):
