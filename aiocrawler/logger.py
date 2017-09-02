@@ -18,6 +18,7 @@ def has_level_handler(logger):
 
     return False
 
+
 default_handler = logging.StreamHandler(sys.stdout)
 default_handler.setFormatter(logging.Formatter(
     '[%(asctime)s] %(levelname)s in %(module)s: %(message)s'

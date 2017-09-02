@@ -1,11 +1,16 @@
-from aiocrawl import AioCrawl
+from aiocrawler import AioCrawler
+from aiocrawler.request import random_navigator_headers
 
 
-class DemoCrawl(AioCrawl):
+class LianjiaCrawler(AioCrawler):
     concurrency = 50
-    urls = ("http://sh.lianjia.com/zufang/d{}".format(count) for count in range(1, 100))
+    urls = (
+        "http://sh.lianjia.com/zufang/d{}".format(count)
+        for count in range(1, 100)
+    )
     timeout = 30
     debug = True
+    headers = random_navigator_headers
 
     def on_start(self):
         self.get(self.urls, parser=self.parse, sleep=0.2)
@@ -13,17 +18,15 @@ class DemoCrawl(AioCrawl):
     def parse(self, response):
         """
         json:
-        'content_type', 'charset', 'method', 'request', 'url',
+        'content_type', 'charset', 'method', 'request_info', 'url',
         'status', 'cookies', 'headers', 'raw_headers', 'json', 'type'
         html:
-        'content_type', 'charset', 'method', 'request', 'url', 'status', 
+        'content_type', 'charset', 'method', 'request_info', 'url', 'status',
         'cookies', 'headers', 'raw_headers', 'text', 'e_doc', 'p_doc', 'type',
         xpath(), selector()
         """
         if not response.status == 200:
             return
-
-        self.logger.info(response.selector('#house-lst > li:nth-child(1) > div.info-panel > h2 > a'))
 
         houses = response.xpath('//*[@id="house-lst"]/li')
         count = 0
@@ -35,5 +38,5 @@ class DemoCrawl(AioCrawl):
 
 
 if __name__ == "__main__":
-    demo = DemoCrawl()
-    demo()  # same as demo.run()
+    demo = LianjiaCrawler()
+    demo.run()

@@ -1,5 +1,5 @@
-from .wrap import ResponseTypes
 from .responses import JsonResponse, HtmlResponse, XmlResponse
+from .wrap import ResponseTypes
 
 
 __all__ = [JsonResponse, HtmlResponse, XmlResponse]

@@ -1,2 +1,2 @@
-# aiocrawl
-Async crawel framework based on asyncio
+# AioCrawler
+Async crawler framework based on asyncio

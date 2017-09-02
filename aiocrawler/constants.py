@@ -18,3 +18,10 @@ METHOD_OPTIONS = 'OPTIONS'
 METHOD_PATCH = 'PATCH'
 METHOD_POST = 'POST'
 METHOD_PUT = 'PUT'
+
+# aiohttp autogenerates headers like User-Agent or Content-Type
+# if these headers are not explicitly passed.
+AIOHTTP_AUTO_HEADERS = ("User-Agent", "Content-Type")
+
+# if response.status not in the set, drop the response.
+NORMAL_STATUS_CODES = (200, 201)

@@ -2,7 +2,7 @@ __pycache__/
 *.pyc
 .idea/
 # build-related files
-aiocrawl.egg-info/
+aiocrawler.egg-info/
 build/
 dist/
 download/

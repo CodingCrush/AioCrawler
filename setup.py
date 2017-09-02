@@ -3,8 +3,10 @@ from setuptools import find_packages, setup
 from codecs import open
 import sys
 
+
 # Get the long description from the README file
-with open(os.path.join(os.getcwd(), 'README.md'), encoding='utf-8') as f:
+with open(os.path.join(os.path.dirname(
+        os.path.realpath(__file__)), 'README.md'), encoding='utf-8') as f:
     long_description = f.read()
 
 install_requires = [
@@ -14,7 +16,10 @@ install_requires = [
     'httptools',
     "lxml",
     "pyquery",
-    'uvloop'
+    'uvloop',
+    'click',
+    'ujson',
+    'user_agent'
 ]
 
 if sys.platform.startswith("win"):
@@ -22,8 +27,8 @@ if sys.platform.startswith("win"):
 
 
 setup(
-    name="aiocrawl",
-    version="0.0.1",
+    name="aiocrawler",
+    version="0.0.2",
 
     description="Async crawler framework based on asyncio",
     long_description=long_description,
@@ -31,9 +36,9 @@ setup(
     author="CodingCrush",
     author_email="codingcrush@163.com",
 
-    url='https://github.com/CodingCrush/acrawl',
+    url='https://github.com/CodingCrush/aiocrawler',
     classifiers=[
-        'Development Status :: 3 - Alpha',
+        'Development Status :: 4 - Beta',
         'Intended Audience :: Developers',
 
         'License :: OSI Approved :: MIT License',

@@ -1,10 +1,18 @@
 from lxml import etree
 from pyquery import PyQuery
-from ..exceptions import JsonDecodeError
+from aiocrawler.exceptions import JsonDecodeError
+
 try:
-    import ujson as json
+    from ujson import loads as json_loads
 except ImportError:
+    import sys
     import json
+    # PY35 only support str not bytes.
+    if sys.version_info[:2] == (3, 5):
+        def json_loads(data):
+            return json.loads(data.decode())
+    else:
+        json_loads = json.loads
 
 
 class _BaseResponse(object):
@@ -37,7 +45,7 @@ class JsonResponse(_BaseResponse):
     def json(self):
         if self._json is None:
             try:
-                self._json = json.loads(self.text)
+                self._json = json_loads(self.text)
             # ujson decode exception
             except (ValueError, SyntaxError) as e:
                 raise JsonDecodeError(e)
@@ -69,10 +77,7 @@ class HtmlResponse(_BaseResponse):
         return self._py_query_doc
 
     def xpath(self, path):
-        try:
-            return self.etree.xpath(path)
-        except IndexError:
-            return
+        return self.etree.xpath(path)
 
     def selector(self, rule):
         return self.doc(rule)

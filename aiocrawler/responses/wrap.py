@@ -1,6 +1,9 @@
 from aiohttp.client import ClientResponse as ParResponse
-from mimetypes import guess_type
 from .responses import HtmlResponse, JsonResponse, XmlResponse
+from mimetypes import guess_type
+
+
+# TODO: response encoding
 
 
 class ResponseTypes(object):
