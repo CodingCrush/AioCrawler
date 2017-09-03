@@ -25,3 +25,11 @@ AIOHTTP_AUTO_HEADERS = ("User-Agent", "Content-Type")
 
 # if response.status not in the set, drop the response.
 NORMAL_STATUS_CODES = (200, 201)
+
+
+# sleep for 0.3s when aioredis queue raise QueueFull.
+QUEUE_BLOCK_SLEEP_INTERVAL = 0.3
+
+# Connection pool size.
+AIOREDIS_POOL_MIN_SIZE = 1
+AIOREDIS_POOL_MAX_SIZE = 5

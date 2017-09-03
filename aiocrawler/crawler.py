@@ -105,6 +105,7 @@ class AioCrawler(object):
                 self.logger.debug("[{}] {} [TimeoutError][Try:{}]".format(
                     method, this_request_url, try_count)
                 )
+            await asyncio.sleep(sleep or 0)
         else:  # still fail
             self._failed_urls.add(this_request_url)
             return self.logger.error("[{}] {} [Failure][Try:{}]".format(
@@ -219,7 +220,10 @@ class AioCrawler(object):
             self._tasks_que.task_done()
 
     async def work(self):
-        self.on_start()
+        if inspect.iscoroutinefunction(self.on_start):
+            await self.on_start()
+        else:
+            self.on_start()
 
         workers = [
             asyncio.Task(self.workers(), loop=self.loop)

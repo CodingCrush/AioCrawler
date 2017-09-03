@@ -19,7 +19,9 @@ install_requires = [
     'uvloop',
     'click',
     'ujson',
-    'user_agent'
+    'user_agent',
+    'aioredis==1.0.0b2',
+    'umsgpack'
 ]
 
 if sys.platform.startswith("win"):
